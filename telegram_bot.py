@@ -17,50 +17,113 @@ import re
 import json
 import os
 import socket
+import tempfile
+import shutil
 
 # -----------------------------------------------------------------
-# PERSISTENCE
+# PERSISTENCE — Thread-safe, atomic file writes
 # -----------------------------------------------------------------
 
 AUTHORIZED_USERS_FILE = "authorized_users.json"
-active_tasks = set()  # Per-user concurrency lock
+active_tasks: set = set()  # Per-user concurrency lock
 
-def load_authorized_users():
-    if os.path.exists(AUTHORIZED_USERS_FILE):
+def load_authorized_users() -> set:
+    """Load authorized users from disk. Returns empty set on any failure."""
+    if not os.path.exists(AUTHORIZED_USERS_FILE):
+        return set()
+    try:
+        with open(AUTHORIZED_USERS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            raise ValueError("Expected a list in authorized_users.json")
+        return set(int(uid) for uid in data)
+    except Exception as e:
+        logger_init = logging.getLogger(__name__)
+        logger_init.error(f"[AUTH] Could not load {AUTHORIZED_USERS_FILE}: {e}. Starting with empty set.")
+        return set()
+
+def save_authorized_users(users_set: set) -> bool:
+    """
+    Atomically save authorized users to disk.
+    Writes to a temp file first, then renames, so the main file is never corrupted.
+    Returns True on success, False on failure.
+    """
+    try:
+        dir_path = os.path.dirname(os.path.abspath(AUTHORIZED_USERS_FILE)) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, suffix=".json.tmp")
         try:
-            with open(AUTHORIZED_USERS_FILE, "r") as f:
-                return set(json.load(f))
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(sorted(int(uid) for uid in users_set), f, indent=2)
+            shutil.move(tmp_path, AUTHORIZED_USERS_FILE)
         except Exception:
-            pass
-    return set()
+            os.unlink(tmp_path)
+            raise
+        return True
+    except Exception as e:
+        logging.getLogger(__name__).error(f"[AUTH] Failed to save authorized users: {e}")
+        return False
 
-def save_authorized_users(users_set):
-    with open(AUTHORIZED_USERS_FILE, "w") as f:
-        json.dump(list(users_set), f)
-
-authorized_users = load_authorized_users()
+authorized_users: set = load_authorized_users()
 
 # -----------------------------------------------------------------
 # AUTHORIZATION
 # -----------------------------------------------------------------
 
+def get_admin_id() -> int | None:
+    """Safely retrieve ADMIN_ID as int, or None if not configured."""
+    try:
+        return int(config.ADMIN_ID) if config.ADMIN_ID else None
+    except (ValueError, TypeError):
+        return None
+
+def is_admin(user_id: int) -> bool:
+    """Check if user_id is the configured admin."""
+    admin = get_admin_id()
+    return admin is not None and user_id == admin
+
 def is_authorized(user_id: int) -> bool:
-    if config.ADMIN_ID and str(user_id) == str(config.ADMIN_ID):
-        return True
-    return user_id in authorized_users
+    """Return True if user is admin or in the authorized_users set."""
+    return is_admin(user_id) or user_id in authorized_users
+
+async def get_reply_fn(update: Update):
+    """Return the correct reply function regardless of update type."""
+    if update.message:
+        return update.message.reply_text
+    if update.callback_query:
+        return update.callback_query.message.reply_text
+    return None
 
 async def check_auth(update: Update) -> bool:
-    user_id = update.effective_user.id
+    """
+    Verify the user is authorized.
+    Works for both command and callback_query contexts.
+    Logs all unauthorized access attempts.
+    """
+    user = update.effective_user
+    if user is None:
+        return False
+    user_id = user.id
     if is_authorized(user_id):
         return True
-    uid_str = f"`{user_id}`"
+
+    # Log unauthorized attempt
+    logging.getLogger(__name__).warning(
+        f"[AUTH] Unauthorized access attempt: user_id={user_id} "
+        f"username=@{getattr(user, 'username', 'N/A')} "
+        f"name={getattr(user, 'full_name', 'N/A')}"
+    )
+
     msg = (
         "\U0001f512 *ACCESS DENIED*\n"
-        "---\n"
-        f"Your ID: {uid_str}\n"
+        f"Your ID: `{user_id}`\n"
         "Contact the administrator to request access."
     )
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    reply_fn = await get_reply_fn(update)
+    if reply_fn:
+        try:
+            await reply_fn(msg, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            pass
     return False
 
 # -----------------------------------------------------------------
@@ -439,49 +502,84 @@ def run_bot():
             context.args = [match.group(1)]
             await verify_command(update, context)
 
-    # Admin commands
+    # Admin commands — all guarded by is_admin(), not raw string compare
+    def _require_admin(uid: int) -> bool:
+        return get_admin_id() is not None and is_admin(uid)
+
+    async def _no_admin_configured(update: Update):
+        await update.message.reply_text(
+            "\u26a0\ufe0f `ADMIN_ID` is not set in `.env`. Admin commands are disabled.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
     async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.effective_user.id) != str(config.ADMIN_ID):
+        uid_caller = update.effective_user.id
+        if get_admin_id() is None:
+            await _no_admin_configured(update)
+            return
+        if not is_admin(uid_caller):
             return
         if not context.args:
             await update.message.reply_text("Usage: `/approve <user_id>`", parse_mode=ParseMode.MARKDOWN)
             return
         try:
             uid = int(context.args[0])
+            if is_admin(uid):
+                await update.message.reply_text("\u2139\ufe0f That user is already the admin.")
+                return
             authorized_users.add(uid)
-            save_authorized_users(authorized_users)
-            await update.message.reply_text(f"\u2705 User `{uid}` authorized.", parse_mode=ParseMode.MARKDOWN)
+            if save_authorized_users(authorized_users):
+                await update.message.reply_text(f"\u2705 User `{uid}` authorized.", parse_mode=ParseMode.MARKDOWN)
+            else:
+                authorized_users.discard(uid)  # Roll back on disk error
+                await update.message.reply_text("\u274c Failed to persist. Check disk space/permissions.")
         except ValueError:
-            await update.message.reply_text("\u274c Invalid user ID.")
+            await update.message.reply_text("\u274c Invalid user ID \u2014 must be a number.")
 
     async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.effective_user.id) != str(config.ADMIN_ID):
+        uid_caller = update.effective_user.id
+        if get_admin_id() is None:
+            await _no_admin_configured(update)
+            return
+        if not is_admin(uid_caller):
             return
         if not context.args:
             await update.message.reply_text("Usage: `/revoke <user_id>`", parse_mode=ParseMode.MARKDOWN)
             return
         try:
             uid = int(context.args[0])
-            if uid in authorized_users:
-                authorized_users.remove(uid)
-                save_authorized_users(authorized_users)
+            if is_admin(uid):
+                await update.message.reply_text("\u26d4 You cannot revoke your own admin access.")
+                return
+            if uid not in authorized_users:
+                await update.message.reply_text(f"User `{uid}` is not in the authorized list.", parse_mode=ParseMode.MARKDOWN)
+                return
+            authorized_users.remove(uid)
+            if save_authorized_users(authorized_users):
                 await update.message.reply_text(f"\U0001f6ab User `{uid}` access revoked.", parse_mode=ParseMode.MARKDOWN)
             else:
-                await update.message.reply_text(f"User `{uid}` not in authorized list.", parse_mode=ParseMode.MARKDOWN)
+                authorized_users.add(uid)  # Roll back on disk error
+                await update.message.reply_text("\u274c Failed to persist. Check disk space/permissions.")
         except ValueError:
-            await update.message.reply_text("\u274c Invalid user ID.")
+            await update.message.reply_text("\u274c Invalid user ID \u2014 must be a number.")
 
     async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if str(update.effective_user.id) != str(config.ADMIN_ID):
+        uid_caller = update.effective_user.id
+        if get_admin_id() is None:
+            await _no_admin_configured(update)
+            return
+        if not is_admin(uid_caller):
             return
         if not authorized_users:
             await update.message.reply_text("No authorized users (excluding admin).")
             return
-        users_list = "\n".join([f"\u2022 `{uid}`" for uid in authorized_users])
+        count = len(authorized_users)
+        users_list = "\n".join([f"\u2022 `{uid}`" for uid in sorted(authorized_users)])
         await update.message.reply_text(
-            f"\U0001f465 *Authorized Users*\n{DIV}\n{users_list}",
+            f"\U0001f465 *Authorized Users* ({count})\n{DIV}\n{users_list}",
             parse_mode=ParseMode.MARKDOWN
         )
+
 
     application.add_handler(CommandHandler("approve", approve_command))
     application.add_handler(CommandHandler("revoke", revoke_command))
