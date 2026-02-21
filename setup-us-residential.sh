@@ -78,18 +78,26 @@ ip tuntap add mode tun dev tun1
 ip addr add 198.18.0.1/15 dev tun1
 ip link set dev tun1 up
 
-# 2. Paksa trafik WireGuard ($WG_CIDR) masuk ke tun1
-ip rule add from $WG_CIDR table 100
+# 2. Tandai (MARK) trafik WireGuard, KECUALI DNS (UDP 53)
+# Proxy SOCKS5 perumahan biasanya tidak support UDP, jadi DNS akan mati.
+# Kita paksa DNS (port 53) lewat internet asli VPS, sisanya lewat proxy US.
+iptables -t mangle -A PREROUTING -s $WG_CIDR -j MARK --set-mark 100
+iptables -t mangle -A PREROUTING -s $WG_CIDR -p udp --dport 53 -j MARK --set-mark 0
+
+# 3. Arahkan trafik yang memiliki mark 100 ke tun1 (proxy)
+ip rule add fwmark 100 table 100
 ip route add default dev tun1 table 100
 
-# 3. Jalankan tun2socks (berhenti di sini dan block process)
+# 4. Jalankan tun2socks (berhenti di sini dan block process)
 exec tun2socks -device tun://tun1 -proxy "$PROXY_URL"
 EOF
 
 cat <<EOF | sudo tee /usr/local/bin/stop-us-route.sh > /dev/null
 #!/bin/bash
-ip rule del from $WG_CIDR table 100 2>/dev/null
+ip rule del fwmark 100 table 100 2>/dev/null
 ip link delete tun1 2>/dev/null
+iptables -t mangle -D PREROUTING -s $WG_CIDR -j MARK --set-mark 100 2>/dev/null
+iptables -t mangle -D PREROUTING -s $WG_CIDR -p udp --dport 53 -j MARK --set-mark 0 2>/dev/null
 EOF
 
 chmod +x /usr/local/bin/start-us-route.sh
