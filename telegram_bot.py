@@ -561,6 +561,19 @@ def run_bot():
     application.add_handler(CommandHandler("users",   users_command))
 
     print("\u2705 SHEERID PLATINUM BOT ONLINE")
+
+    # Register command menu (shows in "/" picker on Telegram clients)
+    async def post_init(app):
+        from telegram import BotCommand
+        commands = [
+            BotCommand("start",  "Menu utama"),
+            BotCommand("verify", "Verifikasi link SheerID"),
+            BotCommand("status", "Status sistem"),
+            BotCommand("help",   "Panduan penggunaan"),
+        ]
+        await app.bot.set_my_commands(commands)
+
+    application.post_init = post_init
     application.run_polling()
 
 
