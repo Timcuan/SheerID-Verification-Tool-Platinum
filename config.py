@@ -10,6 +10,11 @@ load_dotenv()
 # Telegram Bot Token (Loaded from .env for security)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# Telegram Admin ID for restricted access
+ADMIN_ID = os.getenv("TELEGRAM_ADMIN_ID")
+if ADMIN_ID:
+    ADMIN_ID = int(ADMIN_ID)
+
 # SheerID API Settings
 SHEERID_API_URL = "https://services.sheerid.com/rest/v2"
 REFERRER_URL = "https://verify.sheerid.com/"

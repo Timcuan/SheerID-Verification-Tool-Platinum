@@ -13,6 +13,50 @@ import sheerid_api
 import student_generator
 import doc_generator
 from datetime import datetime
+import json
+import os
+
+AUTHORIZED_USERS_FILE = "authorized_users.json"
+
+def load_authorized_users():
+    if os.path.exists(AUTHORIZED_USERS_FILE):
+        try:
+            with open(AUTHORIZED_USERS_FILE, "r") as f:
+                return set(json.load(f))
+        except:
+            pass
+    return set()
+
+def save_authorized_users(users_set):
+    with open(AUTHORIZED_USERS_FILE, "w") as f:
+        json.dump(list(users_set), f)
+
+authorized_users = load_authorized_users()
+
+def is_authorized(user_id):
+    if str(config.ADMIN_ID) and str(user_id) == str(config.ADMIN_ID):
+        return True
+    return user_id in authorized_users
+
+async def check_auth(update: Update) -> bool:
+    user_id = update.effective_user.id
+    if is_authorized(user_id):
+        return True
+    await update.message.reply_text(f"""
+```
+╔═══════════════════════════════╗
+║      ACCESS DENIED            ║
+╠═══════════════════════════════╣
+║  You are not authorized       ║
+║  to use this system.          ║
+║                               ║
+║  Your ID: {str(user_id).ljust(19)} ║
+╚═══════════════════════════════╝
+```
+Contact the administrator for access.
+""", parse_mode=ParseMode.MARKDOWN)
+    return False
+
 
 # Setup logging
 logging.basicConfig(
@@ -151,6 +195,7 @@ BANNER_LOADING = """```
 # ═══════════════════════════════════════════════════════════════════════
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update): return
     user_id = update.effective_user.id
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     
@@ -177,6 +222,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update): return
     help_text = f"""
 ```
 ╔═══════════════════════════════════╗
@@ -205,6 +251,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update): return
     import socket
     
     # Check connectivity
@@ -236,6 +283,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
 async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_auth(update): return
     if not context.args:
         error_text = f"""
 ```
@@ -428,10 +476,56 @@ def run_bot():
     application.add_handler(CommandHandler("verify", verify_command))
     
     async def handle_raw_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await check_auth(update): return
         text = update.message.text
         if "sheerid.com/verify/" in text:
             context.args = [text.strip()]
             await verify_command(update, context)
+            
+    # Admin commands
+    async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_user.id) != str(config.ADMIN_ID):
+            return
+        if not context.args:
+            await update.message.reply_text("Usage: `/approve <user_id>`", parse_mode=ParseMode.MARKDOWN)
+            return
+        try:
+            user_id = int(context.args[0])
+            authorized_users.add(user_id)
+            save_authorized_users(authorized_users)
+            await update.message.reply_text(f"✅ User `{user_id}` has been authorized.", parse_mode=ParseMode.MARKDOWN)
+        except ValueError:
+            await update.message.reply_text("Invalid user ID format.")
+
+    async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_user.id) != str(config.ADMIN_ID):
+            return
+        if not context.args:
+            await update.message.reply_text("Usage: `/revoke <user_id>`", parse_mode=ParseMode.MARKDOWN)
+            return
+        try:
+            user_id = int(context.args[0])
+            if user_id in authorized_users:
+                authorized_users.remove(user_id)
+                save_authorized_users(authorized_users)
+                await update.message.reply_text(f"❌ User `{user_id}` access revoked.", parse_mode=ParseMode.MARKDOWN)
+            else:
+                await update.message.reply_text(f"User `{user_id}` is not in the authorized list.", parse_mode=ParseMode.MARKDOWN)
+        except ValueError:
+            await update.message.reply_text("Invalid user ID format.")
+
+    async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if str(update.effective_user.id) != str(config.ADMIN_ID):
+            return
+        if not authorized_users:
+            await update.message.reply_text("No authorized users found (excluding admin).")
+            return
+        users_list = "\n".join([f"- `{uid}`" for uid in authorized_users])
+        await update.message.reply_text(f"**Authorized Users:**\n{users_list}", parse_mode=ParseMode.MARKDOWN)
+
+    application.add_handler(CommandHandler("approve", approve_command))
+    application.add_handler(CommandHandler("revoke", revoke_command))
+    application.add_handler(CommandHandler("users", users_command))
     
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_raw_message))
 
