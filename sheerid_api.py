@@ -30,8 +30,9 @@ class SheerIDClient:
     def start_verification(self, program_id):
         """Creates a new verification session for a program"""
         print(f"[*] Initializing new verification session for program {program_id}...")
-        url = f"{self.base_url}/verification/program/{program_id}"
+        url = f"{self.base_url}/verification"
         payload = {
+            "programId": program_id,
             "metadata": {
                 "locale": "en-US",
                 "marketConsentValue": False
@@ -206,8 +207,10 @@ class SheerIDClient:
         except: pass
 
         # Submit Info
-        print(f"[*] Submitting Payload: {student_data[display_info][full_name]}")
+        print(f"[*] Submitting Payload: {student_data['display_info']['full_name']}")
         result = self.submit_student_info(verification_id, student_data)
+        current_step = result.get("currentStep")
+        
         # Handle Instant Error
         if current_step == "error" or not current_step:
             print("[!] Step 1 returned error. Checking actual state...")

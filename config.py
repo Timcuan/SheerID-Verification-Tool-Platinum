@@ -30,7 +30,7 @@ COUNTRY = "US"
 
 # Anti-Detect Settings
 USE_PROXY = True
-PROXY_URL = "http://jxbtrlti:42fcoicerjtv@23.26.71.145:5628"
+PROXY_URL = os.getenv("PROXY_URL", "http://pxssjjhe:awdy9sipxzln@216.10.27.159:6837")
 
 # Logging
 LOG_LEVEL = "INFO"
