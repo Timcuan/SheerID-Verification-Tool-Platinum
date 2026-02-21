@@ -74,6 +74,16 @@ echo -e "${YELLOW}[→] Membuat service background 'us-proxy-route'...${NC}"
 cat <<EOF | sudo tee /usr/local/bin/start-us-route.sh > /dev/null
 #!/bin/bash
 
+# 0. Bersihkan sisa routing lama jika service restart
+ip rule del fwmark 100 table 100 2>/dev/null
+ip route del default dev tun1 table 100 2>/dev/null
+ip link delete tun1 2>/dev/null
+iptables -t mangle -D PREROUTING -s $WG_CIDR -j WG_PROXY 2>/dev/null
+iptables -t mangle -F WG_PROXY 2>/dev/null
+iptables -t mangle -X WG_PROXY 2>/dev/null
+iptables -t filter -D FORWARD -i wg0 -o tun1 -j ACCEPT 2>/dev/null
+iptables -t filter -D FORWARD -i tun1 -o wg0 -j ACCEPT 2>/dev/null
+
 # 1. Bikin interface virtual
 ip tuntap add mode tun dev tun1
 ip addr add 198.18.0.1/15 dev tun1
