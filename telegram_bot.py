@@ -42,19 +42,7 @@ async def check_auth(update: Update) -> bool:
     user_id = update.effective_user.id
     if is_authorized(user_id):
         return True
-    await update.message.reply_text(f"""
-```
-╔═══════════════════════════════╗
-║      ACCESS DENIED            ║
-╠═══════════════════════════════╣
-║  You are not authorized       ║
-║  to use this system.          ║
-║                               ║
-║  Your ID: {str(user_id).ljust(19)} ║
-╚═══════════════════════════════╝
-```
-Contact the administrator for access.
-""", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"❌ **Access Denied**. You are not authorized (ID: `{user_id}`). Contact the administrator for access.", parse_mode=ParseMode.MARKDOWN)
     return False
 
 
@@ -199,54 +187,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    welcome_text = f"""{BANNER_MAIN}
+    welcome_text = f"""🛡️ **SHEERID VERIFICATION BOT PLATINUM**
 
-{UI.header("SYSTEM STATUS")}
+**System Status**
+✅ Node: ONLINE
+👤 Session: `{user_id}`
+🟢 Access: AUTHORIZED
+⏱️ Time: {timestamp}
 
-{UI.status_line("NODE", "ONLINE")}
-{UI.status_line("SESSION", f"`{user_id}`")}
-{UI.status_line("ACCESS", "AUTHORIZED")}
-{UI.status_line("TIMESTAMP", timestamp)}
+**Available Commands**
+🔹 `/verify [url]` - Execute verification
+🔹 `/status` - System diagnostics
+🔹 `/help` - Protocol manual
 
-{UI.divider()}
-
-{UI.header("AVAILABLE COMMANDS")}
-
-{UI.ARROW} `/verify [url]`  Execute verification
-{UI.ARROW} `/status`        System diagnostics
-{UI.ARROW} `/help`          Protocol manual
-
-{UI.divider()}
-`Paste any SheerID link directly to verify`
+_Paste any SheerID link directly to verify_
 """
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update): return
-    help_text = f"""
-```
-╔═══════════════════════════════════╗
-║     OPERATIONAL PROTOCOL v2.0     ║
-╠═══════════════════════════════════╣
-║                                   ║
-║  [1] ACQUIRE TARGET               ║
-║      Copy verification link       ║
-║      from offer page              ║
-║                                   ║
-║  [2] NETWORK REQUIREMENTS         ║
-║      US residential IP required   ║
-║      VPN endpoints acceptable     ║
-║                                   ║
-║  [3] EXECUTE                      ║
-║      /verify <link>               ║
-║      or paste link directly       ║
-║                                   ║
-╠═══════════════════════════════════╣
-║  TLS FINGERPRINT  │  Chrome 131   ║
-║  API VERSION      │  2.178.0      ║
-║  STEALTH LEVEL    │  MAXIMUM      ║
-╚═══════════════════════════════════╝
-```
+    help_text = f"""📖 **OPERATIONAL PROTOCOL v2.0**
+
+**1. Acquire Target**
+   Copy verification link from the offer page.
+
+**2. Network Requirements**
+   US residential IP proxy required. 
+
+**3. Execute**
+   Type `/verify <link>` or paste the link directly in the chat.
+
+*Stealth Details:*
+• TLS Fingerprint: Chrome 131
+• Stealth Level: Maximum
 """
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -257,42 +230,30 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check connectivity
     try:
         socket.create_connection(("services.sheerid.com", 443), timeout=5)
-        api_status = f"{UI.PULSE} CONNECTED"
+        api_status = "✅ CONNECTED"
     except:
-        api_status = f"{UI.HOLLOW} UNREACHABLE"
+        api_status = "❌ UNREACHABLE"
     
-    proxy_status = f"{UI.PULSE} ACTIVE" if config.USE_PROXY else f"{UI.HOLLOW} DISABLED"
+    proxy_status = "✅ ACTIVE" if config.USE_PROXY else "❌ DISABLED"
     
-    status_text = f"""
-```
-┌─────────────────────────────────┐
-│      SYSTEM DIAGNOSTICS         │
-├─────────────────────────────────┤
-│                                 │
-│  SheerID API     {api_status.ljust(12)}   │
-│  Proxy Module    {proxy_status.ljust(12)}   │
-│  Doc Generator   ● READY        │
-│  Identity Pool   ● LOADED       │
-│                                 │
-├─────────────────────────────────┤
-│  MEMORY   [{UI.PROG_FULL*7}{UI.PROG_EMPTY*5}]  58%      │
-│  UPTIME   [{UI.PROG_FULL*10}{UI.PROG_EMPTY*2}]  STABLE   │
-└─────────────────────────────────┘
-```
+    status_text = f"""📊 **SYSTEM DIAGNOSTICS**
+
+⚙️ **Modules**
+• SheerID API: {api_status}
+• Proxy Module: {proxy_status}
+• Doc Generator: ✅ READY
+• Identity Pool: ✅ LOADED
+
+💻 **System**
+• Memory: Stable
+• Uptime: Stable
 """
     await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
 async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update): return
     if not context.args:
-        error_text = f"""
-```
-{UI.tl}{UI.h*28}{UI.tr}
-{UI.v}  ERROR: MISSING ARGUMENT   {UI.v}
-{UI.bl}{UI.h*28}{UI.br}
-```
-Usage: `/verify https://...`
-"""
+        error_text = "❌ **Error: Missing Argument**\nUsage: `/verify https://...`"
         await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
         return
 
@@ -303,25 +264,17 @@ Usage: `/verify https://...`
     
     verification_id, is_program = client.extract_verification_id_from_url(url)
     if not verification_id:
-        await update.message.reply_text(f"""
-```
-{UI.tl}{UI.h*28}{UI.tr}
-{UI.v}  ERROR: INVALID LINK       {UI.v}
-{UI.v}  Cannot extract ID         {UI.v}
-{UI.bl}{UI.h*28}{UI.br}
-```
-""", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("❌ **Error: Invalid Link**\nCannot extract Verification ID.", parse_mode=ParseMode.MARKDOWN)
         return
 
     # Initial status
-    init_text = f"""{BANNER_LOADING}
+    init_text = f"""⏳ **INITIALIZING VERIFICATION**
+    
+🆔 Task ID: `{verification_id[:16]}...`
+👤 Operator: {user.first_name}
+⏱️ Time: {datetime.now().strftime('%H:%M:%S')}
 
-{UI.status_line("TASK ID", f"`{verification_id[:16]}...`")}
-{UI.status_line("OPERATOR", user.first_name)}
-{UI.status_line("TIME", datetime.now().strftime('%H:%M:%S'))}
-
-{UI.progress_bar(1, 4)} `PHASE 1/4`
-{UI.ARROW} Generating identity profile...
+➡️ *Phase 1/4: Generating identity profile...*
 """
     status_msg = await update.message.reply_text(init_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -331,20 +284,13 @@ Usage: `/verify https://...`
         univ_name = profile["display_info"]["university"]
         student_name = profile["display_info"]["full_name"]
         
-        phase2_text = f"""
-```
-╭─────────────────────────────╮
-│ ▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░ │
-│      PAYLOAD INJECTION      │
-╰─────────────────────────────╯
-```
+        phase2_text = f"""🚀 **PAYLOAD INJECTION**
 
-{UI.status_line("TARGET", univ_name[:20])}
-{UI.status_line("PROFILE", student_name)}
-{UI.status_line("EMAIL", profile['email'][:24])}
+🏫 Target: {univ_name[:20]}
+🎓 Profile: {student_name}
+📧 Email: {profile['email'][:24]}
 
-{UI.progress_bar(2, 4)} `PHASE 2/4`
-{UI.ARROW} Submitting to SheerID API...
+➡️ *Phase 2/4: Submitting to SheerID API...*
 """
         await status_msg.edit_text(phase2_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -359,65 +305,40 @@ Usage: `/verify https://...`
         
         # Step 3: Handle Result
         if result["status"] == "SUCCESS":
-            success_text = f"""{BANNER_SUCCESS}
+            success_text = f"""✅ **VERIFICATION COMPLETE**
 
-{UI.header("VERIFICATION DATA")}
+**Verification Data**
+🏫 Institution: {univ_name}
+🎓 Identity: {student_name}
+📧 Email: `{profile['email']}`
 
-{UI.status_line("INSTITUTION", univ_name[:20])}
-{UI.status_line("IDENTITY", student_name)}
-{UI.status_line("EMAIL", f"`{profile['email']}`")}
-
-{UI.divider()}
-{UI.header("REWARD ACQUIRED")}
-"""
+**Reward Acquired**"""
             if result.get("reward_code"):
-                success_text += f"\n{UI.ARROW} Code: `{result['reward_code']}`"
+                success_text += f"\n🔑 Code: `{result['reward_code']}`"
                 
             if result.get("redirect_url"):
-                success_text += f"\n{UI.ARROW} [Access Reward]({result['redirect_url']})"
+                success_text += f"\n🔗 [Access Reward]({result['redirect_url']})"
                 
-            success_text += f"""
-
-{UI.divider()}
-```
-  CONNECTION TERMINATED SECURELY
-```
-"""
+            success_text += "\n\n🔒 _Connection Terminated Securely_"
+            
             await status_msg.edit_text(success_text, parse_mode=ParseMode.MARKDOWN)
             
         elif result["status"] == "TIMEOUT":
             last_step = result.get("last_details", {}).get("currentStep")
             if last_step == "pending":
-                pending_text = f"""
-```
-┌─────────────────────────────────┐
-│     MANUAL REVIEW QUEUED        │
-├─────────────────────────────────┤
-│                                 │
-│  Documents submitted OK         │
-│  Awaiting SheerID review        │
-│                                 │
-│  Auto-monitor: 30 minutes       │
-│  You will be notified           │
-│                                 │
-└─────────────────────────────────┘
-```
+                pending_text = f"""⏳ **MANUAL REVIEW QUEUED**
 
-{UI.ARROW} Backup link: `{url[:40]}...`
+Documents submitted successfully. Awaiting SheerID review.
+Auto-monitor is active for 30 minutes. You will be notified.
+
+🔗 Backup link: `{url[:40]}...`
 """
                 await status_msg.edit_text(pending_text, parse_mode=ParseMode.MARKDOWN)
                 
                 import subprocess
                 subprocess.Popen(["python3", "monitor_task.py", verification_id, str(update.effective_chat.id)])
             else:
-                await status_msg.edit_text(f"""
-```
-{UI.tl}{UI.h*26}{UI.tr}
-{UI.v}  TIMEOUT: No response   {UI.v}
-{UI.v}  Check link manually    {UI.v}
-{UI.bl}{UI.h*26}{UI.br}
-```
-""", parse_mode=ParseMode.MARKDOWN)
+                await status_msg.edit_text("⚠️ **TIMEOUT**. No response received. Please check the link manually.", parse_mode=ParseMode.MARKDOWN)
         
         else:
             reason = result.get("reason")
@@ -428,29 +349,17 @@ Usage: `/verify https://...`
             
             error_msg = str(reason or result.get("status", "Unknown"))[:30]
             
-            fail_text = f"""{BANNER_FAIL}
+            fail_text = f"""❌ **VERIFICATION DENIED**
 
-{UI.status_line("REASON", error_msg)}
-{UI.status_line("TARGET", univ_name[:18])}
+🚨 Reason: {error_msg}
+🏫 Target: {univ_name[:18]}
 
-{UI.divider()}
-```
-HINT: IP mismatch or session
-      tainted. Use fresh link.
-```
+💡 *Hint: IP mismatch or session tainted. Use a fresh link.*
 """
             await status_msg.edit_text(fail_text, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
-        error_text = f"""
-```
-╔═══════════════════════════════╗
-║      SYSTEM EXCEPTION         ║
-╠═══════════════════════════════╣
-║  {str(e)[:27].ljust(27)}   ║
-╚═══════════════════════════════╝
-```
-"""
+        error_text = f"❌ **SYSTEM EXCEPTION**\n`{str(e)[:50]}`"
         await status_msg.edit_text(error_text, parse_mode=ParseMode.MARKDOWN)
         logging.error(f"Error processing {verification_id}: {e}")
 
@@ -460,12 +369,7 @@ HINT: IP mismatch or session
 
 def run_bot():
     if config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print(f"""
-{UI.TL}{UI.H*30}{UI.TR}
-{UI.V}  CONFIG ERROR              {UI.V}
-{UI.V}  Set BOT_TOKEN in .env     {UI.V}
-{UI.BL}{UI.H*30}{UI.BR}
-""")
+        print("❌ CONFIG ERROR: Set BOT_TOKEN in .env")
         return
 
     application = ApplicationBuilder().token(config.BOT_TOKEN).build()
@@ -529,13 +433,7 @@ def run_bot():
     
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_raw_message))
 
-    print(f"""
-{UI.TL}{UI.H*32}{UI.TR}
-{UI.V}  SHEERID PLATINUM BOT        {UI.V}
-{UI.V}  Status: ONLINE              {UI.V}
-{UI.V}  Press Ctrl+C to terminate   {UI.V}
-{UI.BL}{UI.H*32}{UI.BR}
-""")
+    print("✅ SHEERID PLATINUM BOT ONLINE. Press Ctrl+C to terminate.")
 
     # Render.com Web Service Dummy Server
     import os
