@@ -73,31 +73,44 @@ echo -e "${YELLOW}[→] Membuat service background 'us-proxy-route'...${NC}"
 
 cat <<EOF | sudo tee /usr/local/bin/start-us-route.sh > /dev/null
 #!/bin/bash
+
 # 1. Bikin interface virtual
 ip tuntap add mode tun dev tun1
 ip addr add 198.18.0.1/15 dev tun1
 ip link set dev tun1 up
 
-# 2. Tandai (MARK) trafik WireGuard, KECUALI DNS (UDP 53)
-# Proxy SOCKS5 perumahan biasanya tidak support UDP, jadi DNS akan mati.
-# Kita paksa DNS (port 53) lewat internet asli VPS, sisanya lewat proxy US.
-iptables -t mangle -A PREROUTING -s $WG_CIDR -j MARK --set-mark 100
-iptables -t mangle -A PREROUTING -s $WG_CIDR -p udp --dport 53 -j MARK --set-mark 0
+# 2. Setup Routing berbasis Mangle (FwMark)
+# Beri tanda "100" pada semua trafik dari VPN, KECUALI trafik DNS (port 53)
+iptables -t mangle -N WG_PROXY
+iptables -t mangle -A PREROUTING -s $WG_CIDR -j WG_PROXY
+iptables -t mangle -A WG_PROXY -p udp --dport 53 -j RETURN   # Biarkan DNS lolos
+iptables -t mangle -A WG_PROXY -p tcp --dport 53 -j RETURN   # Biarkan DNS lolos
+iptables -t mangle -A WG_PROXY -j MARK --set-mark 100        # Sisanya tandai 100
 
-# 3. Arahkan trafik yang memiliki mark 100 ke tun1 (proxy)
+# 3. Arahkan trafik bergambar "100" ke tun1
 ip rule add fwmark 100 table 100
 ip route add default dev tun1 table 100
 
-# 4. Jalankan tun2socks (berhenti di sini dan block process)
+# 4. Agar TCP berjalan lancar via TUN
+iptables -t filter -A FORWARD -i wg0 -o tun1 -j ACCEPT
+iptables -t filter -A FORWARD -i tun1 -o wg0 -j ACCEPT
+
+# 5. Jalankan tun2socks (block process)
 exec tun2socks -device tun://tun1 -proxy "$PROXY_URL"
 EOF
 
 cat <<EOF | sudo tee /usr/local/bin/stop-us-route.sh > /dev/null
 #!/bin/bash
 ip rule del fwmark 100 table 100 2>/dev/null
+ip route del default dev tun1 table 100 2>/dev/null
 ip link delete tun1 2>/dev/null
-iptables -t mangle -D PREROUTING -s $WG_CIDR -j MARK --set-mark 100 2>/dev/null
-iptables -t mangle -D PREROUTING -s $WG_CIDR -p udp --dport 53 -j MARK --set-mark 0 2>/dev/null
+
+iptables -t mangle -D PREROUTING -s $WG_CIDR -j WG_PROXY 2>/dev/null
+iptables -t mangle -F WG_PROXY 2>/dev/null
+iptables -t mangle -X WG_PROXY 2>/dev/null
+
+iptables -t filter -D FORWARD -i wg0 -o tun1 -j ACCEPT 2>/dev/null
+iptables -t filter -D FORWARD -i tun1 -o wg0 -j ACCEPT 2>/dev/null
 EOF
 
 chmod +x /usr/local/bin/start-us-route.sh
