@@ -380,8 +380,8 @@ Auto-monitor is active for 30 minutes. You will be notified.
 # ═══════════════════════════════════════════════════════════════════════
 
 def run_bot():
-    if config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ CONFIG ERROR: Set BOT_TOKEN in .env")
+    if not config.BOT_TOKEN or config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("❌ CONFIG ERROR: Set TELEGRAM_BOT_TOKEN in .env")
         return
 
     application = ApplicationBuilder().token(config.BOT_TOKEN).build()
