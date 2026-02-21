@@ -18,9 +18,9 @@ import json
 import os
 import socket
 
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # PERSISTENCE
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 AUTHORIZED_USERS_FILE = "authorized_users.json"
 active_tasks = set()  # Per-user concurrency lock
@@ -40,9 +40,9 @@ def save_authorized_users(users_set):
 
 authorized_users = load_authorized_users()
 
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # AUTHORIZATION
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def is_authorized(user_id: int) -> bool:
     if config.ADMIN_ID and str(user_id) == str(config.ADMIN_ID):
@@ -55,17 +55,17 @@ async def check_auth(update: Update) -> bool:
         return True
     uid_str = f"`{user_id}`"
     msg = (
-        "🔒 *ACCESS DENIED*\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "\U0001f512 *ACCESS DENIED*\n"
+        "---\n"
         f"Your ID: {uid_str}\n"
         "Contact the administrator to request access."
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
     return False
 
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # LOGGING
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -73,165 +73,155 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────
-# UI CONSTANTS
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# CONSTANTS
+# -----------------------------------------------------------------
 
-DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━"
+DIV = "\u2501" * 22
 
-# ─────────────────────────────────────────────────────────────
-# MENUS (Inline Keyboards)
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# MENUS
+# -----------------------------------------------------------------
 
-def main_menu_keyboard():
+def main_menu_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡  Launch Verification", callback_data="launch_verify")],
+        [InlineKeyboardButton("\u26a1  Launch Verification", callback_data="launch_verify")],
         [
-            InlineKeyboardButton("📊 Status", callback_data="show_status"),
-            InlineKeyboardButton("📖 Help",   callback_data="show_help"),
+            InlineKeyboardButton("\U0001f4ca Status",  callback_data="show_status"),
+            InlineKeyboardButton("\U0001f4d6 Help",    callback_data="show_help"),
         ],
     ])
 
-def verify_info_keyboard():
+def back_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
+        [InlineKeyboardButton("\U0001f3e0 Main Menu", callback_data="main_menu")]
     ])
 
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# SHARED RENDERERS
+# -----------------------------------------------------------------
+
+async def render_status(send_fn, edit=False):
+    try:
+        socket.create_connection(("services.sheerid.com", 443), timeout=5)
+        api_status = "\U0001f7e2 Connected"
+    except Exception:
+        api_status = "\U0001f534 Unreachable"
+
+    proxy_status = "\U0001f7e2 Active" if config.USE_PROXY else "\u26aa Disabled"
+    proxy_display = f"`{config.PROXY_URL[:30]}...`" if config.USE_PROXY else "_None_"
+
+    msg = (
+        "\U0001f4ca *SYSTEM STATUS*\n"
+        f"{DIV}\n"
+        f"\U0001f310 SheerID API  \u2192 {api_status}\n"
+        f"\U0001f500 Proxy        \u2192 {proxy_status}\n"
+        f"\U0001f4c4 Doc Engine   \u2192 \U0001f7e2 Ready\n"
+        f"\U0001f393 Identity DB  \u2192 \U0001f7e2 Loaded\n"
+        f"{DIV}\n"
+        f"\U0001f517 Proxy: {proxy_display}\n"
+        f"\U0001f550 Checked: `{datetime.now().strftime('%H:%M:%S')}`"
+    )
+    await send_fn(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=back_kb())
+
+async def render_help(send_fn, edit=False):
+    msg = (
+        "\U0001f4d6 *HOW TO USE*\n"
+        f"{DIV}\n"
+        "*Step 1 \u2014 Get the Link*\n"
+        "Open the SheerID offer page and copy the verification URL.\n\n"
+        "*Step 2 \u2014 Start Verification*\n"
+        "Paste the link directly in chat, or use:\n"
+        "`/verify <link>`\n\n"
+        "*Step 3 \u2014 Wait*\n"
+        "The bot will auto-generate a student profile, submit it, and handle document uploads automatically.\n\n"
+        f"{DIV}\n"
+        "\U0001f4cc *Requirements*\n"
+        "\u2022 US residential proxy (configured)\n"
+        "\u2022 Valid SheerID program link\n\n"
+        "\U0001f527 *Admin Commands*\n"
+        "\u2022 `/approve <id>` \u2014 Grant access\n"
+        "\u2022 `/revoke <id>`  \u2014 Revoke access\n"
+        "\u2022 `/users`        \u2014 List authorized users"
+    )
+    await send_fn(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=back_kb())
+
+# -----------------------------------------------------------------
 # COMMAND HANDLERS
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update):
         return
     user = update.effective_user
-    now = datetime.now().strftime("%d %b %Y · %H:%M")
+    now = datetime.now().strftime("%d %b %Y \u00b7 %H:%M")
     msg = (
-        "🛡️ *SHEERID PLATINUM*\n"
-        f"{DIVIDER}\n"
-        f"👤 User: *{user.first_name}*\n"
-        f"🟢 Status: *Online*\n"
-        f"🕐 Time: `{now}`\n"
-        f"{DIVIDER}\n"
-        "_Paste a SheerID link directly or use the menu below._"
+        "\U0001f6e1\ufe0f *SHEERID PLATINUM*\n"
+        f"{DIV}\n"
+        f"\U0001f464 User: *{user.first_name}*\n"
+        f"\U0001f7e2 Status: *Online*\n"
+        f"\U0001f550 Time: `{now}`\n"
+        f"{DIV}\n"
+        "_Paste a SheerID link or use the menu below._"
     )
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=main_menu_keyboard())
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=main_menu_kb())
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update):
         return
-    await _send_help(update.message.reply_text)
+    await render_help(update.message.reply_text)
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update):
         return
-    await _send_status(update.message.reply_text)
+    await render_status(update.message.reply_text)
 
-# ─────────────────────────────────────────────────────────────
-# CALLBACK QUERY HANDLER (Inline Button Presses)
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
+# CALLBACK HANDLER
+# -----------------------------------------------------------------
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = query.from_user.id
-    if not is_authorized(user_id):
-        await query.answer("⛔ Access Denied", show_alert=True)
+    if not is_authorized(query.from_user.id):
+        await query.answer("\u26d4 Access Denied", show_alert=True)
         return
 
     data = query.data
 
     if data == "main_menu":
         user = query.from_user
-        now = datetime.now().strftime("%d %b %Y · %H:%M")
+        now = datetime.now().strftime("%d %b %Y \u00b7 %H:%M")
         msg = (
-            "🛡️ *SHEERID PLATINUM*\n"
-            f"{DIVIDER}\n"
-            f"👤 User: *{user.first_name}*\n"
-            f"🟢 Status: *Online*\n"
-            f"🕐 Time: `{now}`\n"
-            f"{DIVIDER}\n"
-            "_Paste a SheerID link directly or use the menu below._"
+            "\U0001f6e1\ufe0f *SHEERID PLATINUM*\n"
+            f"{DIV}\n"
+            f"\U0001f464 User: *{user.first_name}*\n"
+            f"\U0001f7e2 Status: *Online*\n"
+            f"\U0001f550 Time: `{now}`\n"
+            f"{DIV}\n"
+            "_Paste a SheerID link or use the menu below._"
         )
-        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=main_menu_keyboard())
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=main_menu_kb())
 
     elif data == "show_status":
-        await _send_status(query.edit_message_text, edit=True)
+        await render_status(query.edit_message_text, edit=True)
 
     elif data == "show_help":
-        await _send_help(query.edit_message_text, edit=True)
+        await render_help(query.edit_message_text, edit=True)
 
     elif data == "launch_verify":
         msg = (
-            "⚡ *READY TO VERIFY*\n"
-            f"{DIVIDER}\n"
-            "Paste your SheerID verification link directly into the chat.\n\n"
-            "You can also use:\n`/verify <link>`"
+            "\u26a1 *READY TO VERIFY*\n"
+            f"{DIV}\n"
+            "Paste your SheerID verification link directly in the chat.\n\n"
+            "Or use: `/verify <link>`"
         )
-        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=verify_info_keyboard())
+        await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=back_kb())
 
-# ─────────────────────────────────────────────────────────────
-# STATUS & HELP (Shared Renderers)
-# ─────────────────────────────────────────────────────────────
-
-async def _send_status(reply_func, edit=False):
-    # Check SheerID API connectivity
-    try:
-        socket.create_connection(("services.sheerid.com", 443), timeout=5)
-        api_status = "🟢 Connected"
-    except Exception:
-        api_status = "🔴 Unreachable"
-
-    proxy_status = "🟢 Active" if config.USE_PROXY else "⚪ Disabled"
-    proxy_url_display = f"`{config.PROXY_URL[:30]}...`" if config.USE_PROXY else "_None_"
-
-    msg = (
-        "📊 *SYSTEM STATUS*\n"
-        f"{DIVIDER}\n"
-        f"🌐 SheerID API  → {api_status}\n"
-        f"🔀 Proxy        → {proxy_status}\n"
-        f"📄 Doc Engine   → 🟢 Ready\n"
-        f"🎓 Identity DB  → 🟢 Loaded\n"
-        f"{DIVIDER}\n"
-        f"🔗 Proxy: {proxy_url_display}\n"
-        f"🕐 Checked: `{datetime.now().strftime('%H:%M:%S')}`"
-    )
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
-    if edit:
-        await reply_func(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-    else:
-        await reply_func(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-
-async def _send_help(reply_func, edit=False):
-    msg = (
-        "📖 *HOW TO USE*\n"
-        f"{DIVIDER}\n"
-        "*Step 1 — Get the Link*\n"
-        "Open the SheerID offer page and copy the verification URL.\n\n"
-        "*Step 2 — Paste or Command*\n"
-        "Paste the link directly here, or type:\n"
-        "`/verify <link>`\n\n"
-        "*Step 3 — Wait*\n"
-        "The bot will auto-generate a fake student profile, submit it, and handle document uploads if needed.\n\n"
-        f"{DIVIDER}\n"
-        "📌 *Requirements*\n"
-        "• US residential proxy (configured)\n"
-        "• Valid SheerID program link\n\n"
-        "🔧 *Admin Commands*\n"
-        "• `/approve <id>` — Grant access\n"
-        "• `/revoke <id>`  — Revoke access\n"
-        "• `/users`        — List authorized users"
-    )
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]])
-    if edit:
-        await reply_func(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-    else:
-        await reply_func(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=kb)
-
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # VERIFY COMMAND
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update):
@@ -241,14 +231,14 @@ async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_id in active_tasks:
         await update.message.reply_text(
-            "⚠️ *Already Running*\nYou have a verification in progress. Please wait for it to finish.",
+            "\u26a0\ufe0f *Already Running*\nYou have a verification in progress. Please wait.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
 
     if not context.args:
         await update.message.reply_text(
-            "❌ *Missing Link*\nUsage: `/verify <sheerid_url>`",
+            "\u274c *Missing Link*\nUsage: `/verify <sheerid_url>`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
@@ -256,104 +246,134 @@ async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0]
     user = update.effective_user
     active_tasks.add(user_id)
+    status_msg = None
 
     try:
         client = sheerid_api.SheerIDClient(proxy=config.PROXY_URL if config.USE_PROXY else None)
 
-        verification_id, is_program = client.extract_verification_id_from_url(url)
+        # Phase 1 — Extract ID (in thread, non-blocking)
+        verification_id, is_program = await asyncio.to_thread(
+            client.extract_verification_id_from_url, url
+        )
         if not verification_id:
             await update.message.reply_text(
-                "❌ *Invalid Link*\nCould not extract a Verification ID from the URL.",
+                "\u274c *Invalid Link*\nCould not extract a Verification ID from the URL.",
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
-        # ── Phase 1: Init ──────────────────────────────────
         tid = verification_id[:16]
-        phase1 = (
-            "⚡ *VERIFICATION STARTED*\n"
-            f"{DIVIDER}\n"
-            f"🆔 Task: `{tid}...`\n"
-            f"👤 User: *{user.first_name}*\n"
-            f"🕐 Time: `{datetime.now().strftime('%H:%M:%S')}`\n"
-            f"{DIVIDER}\n"
-            "🔬 _Phase 1/4 · Building identity profile..._"
+        status_msg = await update.message.reply_text(
+            "\u26a1 *VERIFICATION STARTED*\n"
+            f"{DIV}\n"
+            f"\U0001f194 Task: `{tid}...`\n"
+            f"\U0001f464 User: *{user.first_name}*\n"
+            f"\U0001f550 Time: `{datetime.now().strftime('%H:%M:%S')}`\n"
+            f"{DIV}\n"
+            "\U0001f52c _Phase 1/4 \u00b7 Building identity profile..._",
+            parse_mode=ParseMode.MARKDOWN
         )
-        status_msg = await update.message.reply_text(phase1, parse_mode=ParseMode.MARKDOWN)
 
-        # ── Phase 2: Profile Generated ─────────────────────
-        profile = student_generator.generate_student_profile()
+        # Phase 2 — Generate profile (in thread)
+        profile = await asyncio.to_thread(student_generator.generate_student_profile)
         univ_name = profile["display_info"]["university"]
         student_name = profile["display_info"]["full_name"]
         email = profile["email"]
 
-        phase2 = (
-            "⚡ *VERIFICATION IN PROGRESS*\n"
-            f"{DIVIDER}\n"
-            f"🎓 Identity: *{student_name}*\n"
-            f"🏫 School: _{univ_name}_\n"
-            f"📧 Email: `{email[:28]}`\n"
-            f"{DIVIDER}\n"
-            "📡 _Phase 2/4 · Submitting to SheerID API..._"
+        await status_msg.edit_text(
+            "\u26a1 *VERIFICATION IN PROGRESS*\n"
+            f"{DIV}\n"
+            f"\U0001f393 Identity: *{student_name}*\n"
+            f"\U0001f3eb School: _{univ_name}_\n"
+            f"\U0001f4e7 Email: `{email[:28]}`\n"
+            f"{DIV}\n"
+            "\U0001f4e1 _Phase 2/4 \u00b7 Submitting to SheerID API..._",
+            parse_mode=ParseMode.MARKDOWN
         )
-        await status_msg.edit_text(phase2, parse_mode=ParseMode.MARKDOWN)
 
-        # ── Phase 3: Submit ────────────────────────────────
+        # Phase 3 — Process & upload docs (blocking, run in thread with live ticker)
         def doc_gen_wrapper(first, last, school):
             if doc_generator.select_document_type() == "student_id":
                 return doc_generator.generate_student_id(first, last, school)
-            else:
-                return doc_generator.generate_transcript(first, last, profile["birthDate"], school)
+            return doc_generator.generate_transcript(first, last, profile["birthDate"], school)
 
-        phase3 = (
-            "⚡ *VERIFICATION IN PROGRESS*\n"
-            f"{DIVIDER}\n"
-            f"🎓 Identity: *{student_name}*\n"
-            f"🏫 School: _{univ_name}_\n"
-            f"📧 Email: `{email[:28]}`\n"
-            f"{DIVIDER}\n"
-            "📄 _Phase 3/4 · Processing documents..._"
-        )
-        await status_msg.edit_text(phase3, parse_mode=ParseMode.MARKDOWN)
+        SPINNERS = ["\U0001f4e1", "\u2699\ufe0f", "\U0001f504", "\u23f3"]
+        ticker_done = asyncio.Event()
 
-        result = client.process_verification(verification_id, is_program, profile, doc_gen_wrapper)
+        async def live_ticker():
+            """Edits the progress message every 3 s during the blocking API call."""
+            elapsed = 0
+            i = 0
+            while not ticker_done.is_set():
+                await asyncio.sleep(3)
+                if ticker_done.is_set():
+                    break
+                elapsed += 3
+                icon = SPINNERS[i % len(SPINNERS)]
+                i += 1
+                try:
+                    await status_msg.edit_text(
+                        "\u26a1 *VERIFICATION IN PROGRESS*\n"
+                        f"{DIV}\n"
+                        f"\U0001f393 Identity: *{student_name}*\n"
+                        f"\U0001f3eb School: _{univ_name}_\n"
+                        f"\U0001f4e7 Email: `{email[:28]}`\n"
+                        f"{DIV}\n"
+                        f"{icon} _Phase 3/4 \u00b7 Talking to SheerID... ({elapsed}s)_",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    pass  # Silently ignore "message not modified" errors
 
-        # ── Phase 4: Result ────────────────────────────────
-        status = result.get("status", "UNKNOWN")
+        ticker_task = asyncio.create_task(live_ticker())
+        try:
+            result = await asyncio.to_thread(
+                client.process_verification, verification_id, is_program, profile, doc_gen_wrapper
+            )
+        finally:
+            ticker_done.set()
+            ticker_task.cancel()
+            try:
+                await ticker_task
+            except asyncio.CancelledError:
+                pass
 
-        if status == "SUCCESS":
-            success = (
-                "✅ *VERIFICATION COMPLETE*\n"
-                f"{DIVIDER}\n"
-                f"🎓 Identity: *{student_name}*\n"
-                f"🏫 School: _{univ_name}_\n"
-                f"📧 Email: `{email}`\n"
-                f"{DIVIDER}\n"
+        # Phase 4 — Show result
+        outcome = result.get("status", "UNKNOWN")
+
+        if outcome == "SUCCESS":
+            msg = (
+                "\u2705 *VERIFICATION COMPLETE*\n"
+                f"{DIV}\n"
+                f"\U0001f393 Identity: *{student_name}*\n"
+                f"\U0001f3eb School: _{univ_name}_\n"
+                f"\U0001f4e7 Email: `{email}`\n"
+                f"{DIV}\n"
             )
             if result.get("reward_code"):
-                success += f"🎁 Code: `{result['reward_code']}`\n"
+                msg += f"\U0001f381 Code: `{result['reward_code']}`\n"
             if result.get("redirect_url"):
-                success += f"🔗 [Claim Reward]({result['redirect_url']})\n"
-            success += f"\n🔒 _Session terminated securely._"
-            await status_msg.edit_text(success, parse_mode=ParseMode.MARKDOWN)
+                msg += f"\U0001f517 [Claim Reward]({result['redirect_url']})\n"
+            msg += "\n\U0001f512 _Session terminated securely._"
+            await status_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN)
 
-        elif status == "TIMEOUT":
+        elif outcome == "TIMEOUT":
             last_step = result.get("last_details", {}).get("currentStep")
             if last_step == "pending":
-                pending = (
-                    "⏳ *MANUAL REVIEW QUEUED*\n"
-                    f"{DIVIDER}\n"
-                    "Documents were submitted. SheerID is reviewing them manually.\n"
-                    "You will be notified when the review is complete (up to 30 min).\n"
-                    f"{DIVIDER}\n"
-                    f"🔗 Reference: `{url[:40]}...`"
+                await status_msg.edit_text(
+                    "\u23f3 *MANUAL REVIEW QUEUED*\n"
+                    f"{DIV}\n"
+                    "Documents submitted. SheerID is reviewing manually.\n"
+                    "You will be notified when complete (up to 30 min).\n"
+                    f"{DIV}\n"
+                    f"\U0001f517 Reference: `{url[:40]}...`",
+                    parse_mode=ParseMode.MARKDOWN
                 )
-                await status_msg.edit_text(pending, parse_mode=ParseMode.MARKDOWN)
                 import subprocess
                 subprocess.Popen(["python3", "monitor_task.py", verification_id, str(update.effective_chat.id)])
             else:
                 await status_msg.edit_text(
-                    "⌛ *TIMEOUT*\nNo response from SheerID. Try again with a fresh link.",
+                    "\u231b *TIMEOUT*\nNo response from SheerID. Try again with a fresh link.",
                     parse_mode=ParseMode.MARKDOWN
                 )
 
@@ -363,41 +383,39 @@ async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reason = ", ".join(reason)
             elif isinstance(result.get("details"), dict):
                 reason = result["details"].get("systemErrorMessage", "Unknown")
-            error_msg = str(reason or status)[:60]
+            error_msg = str(reason or outcome)[:60]
 
-            failed = (
-                "❌ *VERIFICATION FAILED*\n"
-                f"{DIVIDER}\n"
-                f"🚨 Reason: _{error_msg}_\n"
-                f"🏫 School: {univ_name[:30]}\n"
-                f"{DIVIDER}\n"
-                "💡 _Try a fresh link. IP or session may be tainted._"
+            await status_msg.edit_text(
+                "\u274c *VERIFICATION FAILED*\n"
+                f"{DIV}\n"
+                f"\U0001f6a8 Reason: _{error_msg}_\n"
+                f"\U0001f3eb School: {univ_name[:30]}\n"
+                f"{DIV}\n"
+                "\U0001f4a1 _Try a fresh link. IP or session may be tainted._",
+                parse_mode=ParseMode.MARKDOWN
             )
-            await status_msg.edit_text(failed, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
         import traceback
         logger.error(f"verify_command error: {e}\n{traceback.format_exc()}")
+        err_text = f"\U0001f4a5 *System Error*\n`{str(e)[:80]}`"
         try:
-            await status_msg.edit_text(
-                f"💥 *System Error*\n`{str(e)[:80]}`",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            if status_msg:
+                await status_msg.edit_text(err_text, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await update.message.reply_text(err_text, parse_mode=ParseMode.MARKDOWN)
         except Exception:
-            await update.message.reply_text(
-                f"💥 *System Error*\n`{str(e)[:80]}`",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            pass
     finally:
         active_tasks.discard(user_id)
 
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 # BOT INITIALIZATION
-# ─────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------
 
 def run_bot():
     if not config.BOT_TOKEN or config.BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        print("❌ CONFIG ERROR: Set TELEGRAM_BOT_TOKEN in .env")
+        print("\u274c CONFIG ERROR: Set TELEGRAM_BOT_TOKEN in .env")
         return
 
     application = ApplicationBuilder().token(config.BOT_TOKEN).build()
@@ -411,7 +429,7 @@ def run_bot():
     # Inline button callbacks
     application.add_handler(CallbackQueryHandler(callback_handler))
 
-    # Raw SheerID link detection
+    # Raw SheerID link detection (in any plain message)
     async def handle_raw_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_auth(update):
             return
@@ -432,9 +450,9 @@ def run_bot():
             uid = int(context.args[0])
             authorized_users.add(uid)
             save_authorized_users(authorized_users)
-            await update.message.reply_text(f"✅ User `{uid}` authorized.", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"\u2705 User `{uid}` authorized.", parse_mode=ParseMode.MARKDOWN)
         except ValueError:
-            await update.message.reply_text("❌ Invalid user ID.")
+            await update.message.reply_text("\u274c Invalid user ID.")
 
     async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(update.effective_user.id) != str(config.ADMIN_ID):
@@ -447,11 +465,11 @@ def run_bot():
             if uid in authorized_users:
                 authorized_users.remove(uid)
                 save_authorized_users(authorized_users)
-                await update.message.reply_text(f"🚫 User `{uid}` access revoked.", parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(f"\U0001f6ab User `{uid}` access revoked.", parse_mode=ParseMode.MARKDOWN)
             else:
-                await update.message.reply_text(f"User `{uid}` not found in authorized list.", parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(f"User `{uid}` not in authorized list.", parse_mode=ParseMode.MARKDOWN)
         except ValueError:
-            await update.message.reply_text("❌ Invalid user ID.")
+            await update.message.reply_text("\u274c Invalid user ID.")
 
     async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(update.effective_user.id) != str(config.ADMIN_ID):
@@ -459,9 +477,9 @@ def run_bot():
         if not authorized_users:
             await update.message.reply_text("No authorized users (excluding admin).")
             return
-        users_list = "\n".join([f"• `{uid}`" for uid in authorized_users])
+        users_list = "\n".join([f"\u2022 `{uid}`" for uid in authorized_users])
         await update.message.reply_text(
-            f"👥 *Authorized Users*\n{DIVIDER}\n{users_list}",
+            f"\U0001f465 *Authorized Users*\n{DIV}\n{users_list}",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -470,7 +488,7 @@ def run_bot():
     application.add_handler(CommandHandler("users", users_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_raw_message))
 
-    print("✅ SHEERID PLATINUM BOT ONLINE. Press Ctrl+C to terminate.")
+    print("\u2705 SHEERID PLATINUM BOT ONLINE. Press Ctrl+C to terminate.")
     application.run_polling()
 
 
