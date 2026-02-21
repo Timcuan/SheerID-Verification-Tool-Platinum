@@ -442,6 +442,27 @@ def run_bot():
 {UI.V}  Press Ctrl+C to terminate   {UI.V}
 {UI.BL}{UI.H*32}{UI.BR}
 """)
+
+    # Render.com Web Service Dummy Server
+    import os
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    
+    port = int(os.environ.get("PORT", 8080))
+    class DummyHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+            
+    def run_dummy_server():
+        server = HTTPServer(("0.0.0.0", port), DummyHandler)
+        print(f"[*] Dummy Web Server running on port {port}")
+        server.serve_forever()
+
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+
     application.run_polling()
 
 if __name__ == "__main__":
