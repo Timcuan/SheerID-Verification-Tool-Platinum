@@ -12,11 +12,12 @@ import config
 import sheerid_api
 import student_generator
 import doc_generator
-from datetime import datetime
+import re
 import json
 import os
 
 AUTHORIZED_USERS_FILE = "authorized_users.json"
+active_tasks = set()
 
 def load_authorized_users():
     if os.path.exists(AUTHORIZED_USERS_FILE):
@@ -252,6 +253,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_auth(update): return
+    user_id = update.effective_user.id
+    
+    if user_id in active_tasks:
+        await update.message.reply_text("⚠️ **Wait!** You already have a verification task running.", parse_mode=ParseMode.MARKDOWN)
+        return
+        
     if not context.args:
         error_text = "❌ **Error: Missing Argument**\nUsage: `/verify https://...`"
         await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
@@ -260,25 +267,26 @@ async def verify_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = context.args[0]
     user = update.effective_user
     
-    client = sheerid_api.SheerIDClient(proxy=config.PROXY_URL if config.USE_PROXY else None)
-    
-    verification_id, is_program = client.extract_verification_id_from_url(url)
-    if not verification_id:
-        await update.message.reply_text("❌ **Error: Invalid Link**\nCannot extract Verification ID.", parse_mode=ParseMode.MARKDOWN)
-        return
+    active_tasks.add(user_id)
+    try:
+        client = sheerid_api.SheerIDClient(proxy=config.PROXY_URL if config.USE_PROXY else None)
+        
+        verification_id, is_program = client.extract_verification_id_from_url(url)
+        if not verification_id:
+            await update.message.reply_text("❌ **Error: Invalid Link**\nCannot extract Verification ID.", parse_mode=ParseMode.MARKDOWN)
+            return
 
-    # Initial status
-    init_text = f"""⏳ **INITIALIZING VERIFICATION**
-    
+        # Initial status
+        init_text = f"""⏳ **INITIALIZING VERIFICATION**
+        
 🆔 Task ID: `{verification_id[:16]}...`
 👤 Operator: {user.first_name}
 ⏱️ Time: {datetime.now().strftime('%H:%M:%S')}
 
 ➡️ *Phase 1/4: Generating identity profile...*
 """
-    status_msg = await update.message.reply_text(init_text, parse_mode=ParseMode.MARKDOWN)
+        status_msg = await update.message.reply_text(init_text, parse_mode=ParseMode.MARKDOWN)
 
-    try:
         # Step 1: Generate Profile
         profile = student_generator.generate_student_profile()
         univ_name = profile["display_info"]["university"]
@@ -359,9 +367,13 @@ Auto-monitor is active for 30 minutes. You will be notified.
             await status_msg.edit_text(fail_text, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
+        import traceback
+        trace = traceback.format_exc()
         error_text = f"❌ **SYSTEM EXCEPTION**\n`{str(e)[:50]}`"
         await status_msg.edit_text(error_text, parse_mode=ParseMode.MARKDOWN)
-        logging.error(f"Error processing {verification_id}: {e}")
+        logging.error(f"Error processing {verification_id}: {e}\n{trace}")
+    finally:
+        active_tasks.discard(user_id)
 
 # ═══════════════════════════════════════════════════════════════════════
 # BOT INITIALIZATION
@@ -382,8 +394,11 @@ def run_bot():
     async def handle_raw_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await check_auth(update): return
         text = update.message.text
-        if "sheerid.com/verify/" in text:
-            context.args = [text.strip()]
+        
+        # Regex to extract URL safely
+        match = re.search(r'(https?://[^\s]+sheerid\.com/verify/[^\s]+)', text)
+        if match:
+            context.args = [match.group(1)]
             await verify_command(update, context)
             
     # Admin commands
@@ -434,26 +449,6 @@ def run_bot():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_raw_message))
 
     print("✅ SHEERID PLATINUM BOT ONLINE. Press Ctrl+C to terminate.")
-
-    # Render.com Web Service Dummy Server
-    import os
-    import threading
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-    
-    port = int(os.environ.get("PORT", 8080))
-    class DummyHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"Bot is running!")
-            
-    def run_dummy_server():
-        server = HTTPServer(("0.0.0.0", port), DummyHandler)
-        print(f"[*] Dummy Web Server running on port {port}")
-        server.serve_forever()
-
-    threading.Thread(target=run_dummy_server, daemon=True).start()
 
     application.run_polling()
 
